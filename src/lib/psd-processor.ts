@@ -80,23 +80,6 @@ export function getPsdHasDesignLayer(psd: Psd): boolean {
   return false;
 }
 
-/**
- * Flatten all layers into a single ordered list (bottom-to-top).
- */
-function flattenLayers(layers: Layer[], parentOpacity = 1): { layer: Layer; opacity: number }[] {
-  const result: { layer: Layer; opacity: number }[] = [];
-  for (const layer of layers) {
-    if (layer.hidden) continue;
-    const opacity = parentOpacity * ((layer.opacity ?? 255) / 255);
-    if (layer.children && layer.children.length > 0) {
-      result.push(...flattenLayers(layer.children, opacity));
-    } else {
-      result.push({ layer, opacity });
-    }
-  }
-  return result;
-}
-
 export async function compositeImage(
   psdFile: File,
   posterFile: File,
@@ -134,37 +117,33 @@ export async function compositeImage(
   const posterImg = await loadImageFromUrl(posterUrl);
   URL.revokeObjectURL(posterUrl);
 
-  // Output canvas
+  // Create poster canvas scaled to layer size (cover fit)
+  const posterCanvas = document.createElement('canvas');
+  posterCanvas.width = layerWidth;
+  posterCanvas.height = layerHeight;
+  const posterCtx = posterCanvas.getContext('2d')!;
+  const crop = coverFit(posterImg.width, posterImg.height, layerWidth, layerHeight);
+  posterCtx.drawImage(posterImg, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, layerWidth, layerHeight);
+
+  // Replace the DESIGN_HERE layer's canvas with our poster
+  designLayer.canvas = posterCanvas;
+
+  // Write the modified PSD back – ag-psd regenerates the composite image
+  const modifiedPsdBuffer = writePsd(psd);
+
+  // Read the modified PSD to get the new flattened composite
+  const modifiedPsd = readPsd(modifiedPsdBuffer, { skipCompositeImageData: false, skipLayerImageData: true });
+
+  // Draw composite to output canvas
   const outputCanvas = document.createElement('canvas');
-  outputCanvas.width = psd.width;
-  outputCanvas.height = psd.height;
+  outputCanvas.width = modifiedPsd.width;
+  outputCanvas.height = modifiedPsd.height;
   const ctx = outputCanvas.getContext('2d')!;
 
-  // Step 1: Draw the original PSD composite (flattened image with all layers)
-  if (psd.canvas) {
-    ctx.drawImage(psd.canvas, 0, 0);
-  }
-
-  // Step 2: Draw the poster over the DESIGN_HERE region (cover fit)
-  const crop = coverFit(posterImg.width, posterImg.height, layerWidth, layerHeight);
-  ctx.drawImage(posterImg, crop.sx, crop.sy, crop.sw, crop.sh, layerLeft, layerTop, layerWidth, layerHeight);
-
-  // Step 3: Re-draw layers ABOVE DESIGN_HERE so overlapping elements (shadows, frames) appear on top
-  const flat = flattenLayers(psd.children || []);
-  let foundDesign = false;
-  for (const { layer, opacity } of flat) {
-    if (layer === designLayer) {
-      foundDesign = true;
-      continue;
-    }
-    if (!foundDesign) continue;
-    if (!layer.canvas) continue;
-
-    const left = layer.left ?? 0;
-    const top = layer.top ?? 0;
-    ctx.globalAlpha = opacity;
-    ctx.drawImage(layer.canvas, left, top);
-    ctx.globalAlpha = 1;
+  if (modifiedPsd.canvas) {
+    ctx.drawImage(modifiedPsd.canvas, 0, 0);
+  } else {
+    throw new Error('Konnte kein Composite-Bild aus der modifizierten PSD generieren.');
   }
 
   // Export as JPEG
