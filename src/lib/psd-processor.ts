@@ -18,6 +18,17 @@ function findDesignLayer(layer: Layer): Layer | null {
   return null;
 }
 
+function collectLayerNames(layers: Layer[], depth = 0): string[] {
+  const names: string[] = [];
+  for (const layer of layers) {
+    names.push(`${'  '.repeat(depth)}${layer.name || '(unnamed)'}`);
+    if (layer.children) {
+      names.push(...collectLayerNames(layer.children, depth + 1));
+    }
+  }
+  return names;
+}
+
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -88,7 +99,12 @@ export async function compositeImage(
   }
 
   if (!designLayer) {
-    throw new Error(`No 'DESIGN_HERE' layer found in ${psdFile.name}`);
+    const layerNames = collectLayerNames(psd.children || []);
+    throw new Error(
+      `Keine 'DESIGN_HERE'-Ebene in ${psdFile.name} gefunden.\n` +
+      `Gefundene Ebenen:\n${layerNames.join('\n')}\n\n` +
+      `Bitte benenne die Ziel-Ebene in deiner PSD exakt in 'DESIGN_HERE' um.`
+    );
   }
 
   // Get layer bounds

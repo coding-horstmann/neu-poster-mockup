@@ -26,8 +26,13 @@ const Index = () => {
     setErrorMsg('');
     try {
       const resultMap = await processAllCombinations(psdFiles, posterFiles, setProgress);
-      setResults(resultMap);
-      setState('done');
+      if (resultMap.size === 0) {
+        setErrorMsg('Keine Bilder konnten generiert werden. Prüfe ob deine PSD-Dateien eine Ebene namens "DESIGN_HERE" enthalten.');
+        setState('error');
+      } else {
+        setResults(resultMap);
+        setState('done');
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Unbekannter Fehler');
       setState('error');
