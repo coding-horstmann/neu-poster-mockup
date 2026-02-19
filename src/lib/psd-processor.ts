@@ -80,12 +80,28 @@ export function getPsdHasDesignLayer(psd: Psd): boolean {
   return false;
 }
 
+/**
+ * Flatten all layers into a single ordered list (bottom-to-top).
+ */
+function flattenLayers(layers: Layer[], parentOpacity = 1): { layer: Layer; opacity: number }[] {
+  const result: { layer: Layer; opacity: number }[] = [];
+  for (const layer of layers) {
+    if (layer.hidden) continue;
+    const opacity = parentOpacity * ((layer.opacity ?? 255) / 255);
+    if (layer.children && layer.children.length > 0) {
+      result.push(...flattenLayers(layer.children, opacity));
+    } else {
+      result.push({ layer, opacity });
+    }
+  }
+  return result;
+}
+
 export async function compositeImage(
   psdFile: File,
   posterFile: File,
   quality: number = 0.92
 ): Promise<Blob> {
-  // Read PSD
   const buffer = await psdFile.arrayBuffer();
   const psd = readPsd(new Uint8Array(buffer), { skipCompositeImageData: false, skipLayerImageData: false });
 
@@ -118,42 +134,38 @@ export async function compositeImage(
   const posterImg = await loadImageFromUrl(posterUrl);
   URL.revokeObjectURL(posterUrl);
 
-  // Create canvas for the poster scaled to layer size (cover)
-  const posterCanvas = document.createElement('canvas');
-  posterCanvas.width = layerWidth;
-  posterCanvas.height = layerHeight;
-  const posterCtx = posterCanvas.getContext('2d')!;
-
-  const crop = coverFit(posterImg.width, posterImg.height, layerWidth, layerHeight);
-  posterCtx.drawImage(posterImg, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, layerWidth, layerHeight);
-
-  // Get the poster pixel data
-  const posterImageData = posterCtx.getImageData(0, 0, layerWidth, layerHeight);
-
-  // Replace the DESIGN_HERE layer's canvas with our poster
-  const layerCanvas = document.createElement('canvas');
-  layerCanvas.width = layerWidth;
-  layerCanvas.height = layerHeight;
-  const layerCtx = layerCanvas.getContext('2d')!;
-  layerCtx.putImageData(posterImageData, 0, 0);
-  designLayer.canvas = layerCanvas;
-
-  // Now composite the full PSD manually
-  // Use the PSD's composite image as base, then overlay our modified layer
+  // Output canvas
   const outputCanvas = document.createElement('canvas');
   outputCanvas.width = psd.width;
   outputCanvas.height = psd.height;
-  const outCtx = outputCanvas.getContext('2d')!;
+  const ctx = outputCanvas.getContext('2d')!;
 
-  // Draw composite (original flattened PSD)
+  // Step 1: Draw the original PSD composite (flattened image with all layers)
   if (psd.canvas) {
-    outCtx.drawImage(psd.canvas, 0, 0);
+    ctx.drawImage(psd.canvas, 0, 0);
   }
 
-  // We need a smarter approach: re-composite from layers
-  // Since ag-psd gives us individual layer canvases, let's composite them
-  outCtx.clearRect(0, 0, psd.width, psd.height);
-  compositeLayersToCanvas(outCtx, psd.children || [], psd.width, psd.height);
+  // Step 2: Draw the poster over the DESIGN_HERE region (cover fit)
+  const crop = coverFit(posterImg.width, posterImg.height, layerWidth, layerHeight);
+  ctx.drawImage(posterImg, crop.sx, crop.sy, crop.sw, crop.sh, layerLeft, layerTop, layerWidth, layerHeight);
+
+  // Step 3: Re-draw layers ABOVE DESIGN_HERE so overlapping elements (shadows, frames) appear on top
+  const flat = flattenLayers(psd.children || []);
+  let foundDesign = false;
+  for (const { layer, opacity } of flat) {
+    if (layer === designLayer) {
+      foundDesign = true;
+      continue;
+    }
+    if (!foundDesign) continue;
+    if (!layer.canvas) continue;
+
+    const left = layer.left ?? 0;
+    const top = layer.top ?? 0;
+    ctx.globalAlpha = opacity;
+    ctx.drawImage(layer.canvas, left, top);
+    ctx.globalAlpha = 1;
+  }
 
   // Export as JPEG
   return new Promise<Blob>((resolve, reject) => {
@@ -166,40 +178,6 @@ export async function compositeImage(
       quality
     );
   });
-}
-
-function compositeLayersToCanvas(
-  ctx: CanvasRenderingContext2D,
-  layers: Layer[],
-  width: number,
-  height: number
-) {
-  // Layers are rendered bottom-to-top
-  for (const layer of layers) {
-    if (layer.hidden) continue;
-
-    const opacity = (layer.opacity ?? 255) / 255;
-
-    if (layer.children && layer.children.length > 0) {
-      // Group layer: create temp canvas and composite children
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = width;
-      tempCanvas.height = height;
-      const tempCtx = tempCanvas.getContext('2d')!;
-      compositeLayersToCanvas(tempCtx, layer.children, width, height);
-
-      ctx.globalAlpha = opacity;
-      ctx.drawImage(tempCanvas, 0, 0);
-      ctx.globalAlpha = 1;
-    } else if (layer.canvas) {
-      const left = layer.left ?? 0;
-      const top = layer.top ?? 0;
-
-      ctx.globalAlpha = opacity;
-      ctx.drawImage(layer.canvas, left, top);
-      ctx.globalAlpha = 1;
-    }
-  }
 }
 
 export async function processAllCombinations(
