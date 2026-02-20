@@ -127,7 +127,7 @@ function drawPerspectiveImage(
   imgW: number, imgH: number,
   tl: [number, number], tr: [number, number],
   br: [number, number], bl: [number, number],
-  subdivisions: number = 8
+  subdivisions: number = 20
 ) {
   const n = subdivisions;
   for (let iy = 0; iy < n; iy++) {
