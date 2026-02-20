@@ -306,11 +306,14 @@ export async function processAllCombinations(
   const total = psdFiles.length * posterFiles.length;
   let current = 0;
 
-  for (const psdFile of psdFiles) {
-    for (const posterFile of posterFiles) {
-      const psdName = psdFile.name.replace(/\.psd$/i, '');
-      const posterName = posterFile.name.replace(/\.(jpe?g|png|webp)$/i, '');
-      const outputName = `${psdName}_${posterName}.jpg`;
+  // Group by poster: each poster gets a folder, mockups are numbered
+  for (const posterFile of posterFiles) {
+    const posterName = posterFile.name.replace(/\.(jpe?g|png|webp)$/i, '');
+    let mockupIndex = 1;
+    for (const psdFile of psdFiles) {
+      const outputName = psdFiles.length === 1
+        ? `${posterName}/${posterName}.jpg`
+        : `${posterName}/${posterName} (${mockupIndex}).jpg`;
 
       onProgress({
         current,
@@ -327,6 +330,7 @@ export async function processAllCombinations(
       }
 
       current++;
+      mockupIndex++;
       onProgress({
         current,
         total,

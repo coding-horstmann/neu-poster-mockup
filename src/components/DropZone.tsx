@@ -39,7 +39,17 @@ export default function DropZone({ label, sublabel, accept, maxFiles, files, onF
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">{label}</h3>
-        <span className="font-mono text-xs text-muted-foreground">{files.length}/{maxFiles}</span>
+        <div className="flex items-center gap-2">
+          {files.length > 0 && (
+            <button
+              onClick={() => onFilesChange([])}
+              className="rounded px-2 py-0.5 font-mono text-xs text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors"
+            >
+              Alle löschen
+            </button>
+          )}
+          <span className="font-mono text-xs text-muted-foreground">{files.length}/{maxFiles}</span>
+        </div>
       </div>
 
       <label
