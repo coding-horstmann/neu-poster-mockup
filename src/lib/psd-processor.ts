@@ -78,6 +78,20 @@ function expandCorners(corners: [number, number][], px: number): [number, number
  * Draw a textured triangle using affine transform.
  * Maps source triangle (s0,s1,s2) from srcCanvas to destination triangle (d0,d1,d2) on ctx.
  */
+function expandTriangle(
+  d0: [number, number], d1: [number, number], d2: [number, number], px: number
+): [[number, number], [number, number], [number, number]] {
+  const cx = (d0[0] + d1[0] + d2[0]) / 3;
+  const cy = (d0[1] + d1[1] + d2[1]) / 3;
+  const expand = (p: [number, number]): [number, number] => {
+    const dx = p[0] - cx;
+    const dy = p[1] - cy;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    return [p[0] + (dx / len) * px, p[1] + (dy / len) * px];
+  };
+  return [expand(d0), expand(d1), expand(d2)];
+}
+
 function drawTexturedTriangle(
   ctx: CanvasRenderingContext2D,
   srcCanvas: HTMLCanvasElement | HTMLImageElement,
@@ -85,16 +99,18 @@ function drawTexturedTriangle(
   s0: [number, number], s1: [number, number], s2: [number, number],
   d0: [number, number], d1: [number, number], d2: [number, number]
 ) {
+  // Expand clip triangle by 1px to eliminate seams between adjacent triangles
+  const [ed0, ed1, ed2] = expandTriangle(d0, d1, d2, 1.0);
+
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(d0[0], d0[1]);
-  ctx.lineTo(d1[0], d1[1]);
-  ctx.lineTo(d2[0], d2[1]);
+  ctx.moveTo(ed0[0], ed0[1]);
+  ctx.lineTo(ed1[0], ed1[1]);
+  ctx.lineTo(ed2[0], ed2[1]);
   ctx.closePath();
   ctx.clip();
 
-  // Solve affine transform: src → dst
-  // We need M such that M * [sx, sy, 1]^T = [dx, dy]
+  // Solve affine transform: src → dst (using original non-expanded points for correct mapping)
   const x0 = s0[0], y0 = s0[1];
   const x1 = s1[0], y1 = s1[1];
   const x2 = s2[0], y2 = s2[1];
