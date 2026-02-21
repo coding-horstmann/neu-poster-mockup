@@ -44,20 +44,57 @@ function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
  * otherwise falls back to layer bounds.
  */
 function extractCornerPoints(layer: Layer): [number, number][] {
-  const pl = (layer as any).placedLayer;
-  if (pl?.nonAffineTransform) {
-    const t = pl.nonAffineTransform;
-    return [[t[0], t[1]], [t[2], t[3]], [t[4], t[5]], [t[6], t[7]]];
-  }
-  if (pl?.transform && Array.isArray(pl.transform)) {
-    const t = pl.transform;
-    return [[t[0], t[1]], [t[2], t[3]], [t[4], t[5]], [t[6], t[7]]];
-  }
   const left = layer.left ?? 0;
   const top = layer.top ?? 0;
   const right = layer.right ?? 0;
   const bottom = layer.bottom ?? 0;
-  return [[left, top], [right, top], [right, bottom], [left, bottom]];
+  const boundsCorners: [number, number][] = [[left, top], [right, top], [right, bottom], [left, bottom]];
+  const boundsArea = Math.abs((right - left) * (bottom - top));
+
+  const pl = (layer as any).placedLayer;
+  const tryTransform = (t: number[]): [number, number][] | null => {
+    if (!t || !Array.isArray(t) || t.length < 8) return null;
+    const corners: [number, number][] = [[t[0], t[1]], [t[2], t[3]], [t[4], t[5]], [t[6], t[7]]];
+    
+    // Validate: compute area of transform quad using shoelace formula
+    const quadArea = Math.abs(
+      (corners[0][0] * corners[1][1] - corners[1][0] * corners[0][1]) +
+      (corners[1][0] * corners[2][1] - corners[2][0] * corners[1][1]) +
+      (corners[2][0] * corners[3][1] - corners[3][0] * corners[2][1]) +
+      (corners[3][0] * corners[0][1] - corners[0][0] * corners[3][1])
+    ) / 2;
+
+    // Check if centroid of transform corners is near centroid of bounds
+    const tcx = corners.reduce((s, c) => s + c[0], 0) / 4;
+    const tcy = corners.reduce((s, c) => s + c[1], 0) / 4;
+    const bcx = (left + right) / 2;
+    const bcy = (top + bottom) / 2;
+    const dist = Math.sqrt((tcx - bcx) ** 2 + (tcy - bcy) ** 2);
+    const boundsSize = Math.sqrt(boundsArea) || 1;
+
+    // Reject if area ratio is too extreme or centroid is too far from bounds
+    if (boundsArea > 0 && (quadArea > boundsArea * 3 || quadArea < boundsArea * 0.1)) {
+      console.warn('Transform area mismatch, using bounds. Transform area:', quadArea, 'Bounds area:', boundsArea);
+      return null;
+    }
+    if (dist > boundsSize * 1.5) {
+      console.warn('Transform centroid too far from bounds, using bounds. Dist:', dist);
+      return null;
+    }
+
+    return corners;
+  };
+
+  if (pl?.nonAffineTransform) {
+    const result = tryTransform(pl.nonAffineTransform);
+    if (result) return result;
+  }
+  if (pl?.transform) {
+    const result = tryTransform(pl.transform);
+    if (result) return result;
+  }
+
+  return boundsCorners;
 }
 
 /**
