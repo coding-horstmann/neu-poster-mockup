@@ -255,9 +255,10 @@ export async function compositeImage(
 
   // Extract corner points (supports perspective via placedLayer)
   const corners = extractCornerPoints(designLayer);
-  const EXPAND_PX = 6;
-  const exp = expandCorners(corners, EXPAND_PX);
-  const [etl, etr, ebr, ebl] = exp;
+  // Shrink corners inward so the poster sits behind the frame, not on top
+  const SHRINK_PX = 2;
+  const shrunk = expandCorners(corners, -SHRINK_PX);
+  const [etl, etr, ebr, ebl] = shrunk;
 
   console.log('Design corners:', corners.map(c => `(${Math.round(c[0])},${Math.round(c[1])})`).join(' '));
 
