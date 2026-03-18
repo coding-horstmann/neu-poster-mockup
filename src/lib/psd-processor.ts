@@ -7,6 +7,12 @@ export interface ProcessingProgress {
   currentPoster: string;
 }
 
+export interface ProcessingSummary {
+  processed: number;
+  succeeded: number;
+  failed: number;
+}
+
 function findDesignLayer(layer: Layer): Layer | null {
   if (layer.name?.toUpperCase() === 'DESIGN_HERE') return layer;
   if (layer.children) {
@@ -338,11 +344,13 @@ export async function processAllCombinations(
   psdFiles: File[],
   posterFiles: File[],
   onProgress: (progress: ProcessingProgress) => void,
+  onResult: (outputName: string, blob: Blob) => Promise<void> | void,
   quality: number = 0.92
-): Promise<Map<string, Blob>> {
-  const results = new Map<string, Blob>();
+): Promise<ProcessingSummary> {
   const total = psdFiles.length * posterFiles.length;
   let current = 0;
+  let succeeded = 0;
+  let failed = 0;
 
   // Group by poster: each poster gets a folder, mockups are numbered
   for (const posterFile of posterFiles) {
@@ -362,9 +370,11 @@ export async function processAllCombinations(
 
       try {
         const blob = await compositeImage(psdFile, posterFile, quality);
-        results.set(outputName, blob);
+        await onResult(outputName, blob);
+        succeeded++;
       } catch (err) {
         console.error(`Error processing ${outputName}:`, err);
+        failed++;
       }
 
       current++;
@@ -378,5 +388,5 @@ export async function processAllCombinations(
     }
   }
 
-  return results;
+  return { processed: total, succeeded, failed };
 }
