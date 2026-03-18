@@ -28,45 +28,48 @@ const Index = () => {
     setSummary(null);
     setZipParts(0);
     try {
-      // ZIP parts to avoid huge memory peaks.
-      // Note: browsers may require allowing multiple downloads for many parts.
-      const ZIP_PART_SIZE = 25; // tune: 20-50 tends to be stable for large JPEGs
-      const partName = (part: number) => `mockups-part-${String(part).padStart(3, '0')}.zip`;
+      // Keep the constant as requested (currently unused in "ZIP per poster" mode).
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const ZIP_PART_SIZE = 25;
 
-      let zip = new JSZip();
-      let inPart = 0;
-      let part = 1;
+      const sanitizeZipName = (name: string) =>
+        name
+          .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 120) || 'poster';
 
-      const flushPart = async () => {
-        if (inPart === 0) return;
-        const zipBlob = await zip.generateAsync({
-          type: 'blob',
-          compression: 'STORE',
-          streamFiles: true,
-        });
-        saveAs(zipBlob, partName(part));
-        setZipParts(part);
-        part++;
-        zip = new JSZip();
-        inPart = 0;
-        // give the browser a breath between parts
-        await new Promise<void>((r) => setTimeout(r, 0));
-      };
+      let zip: JSZip | null = null;
+      let currentPosterZipName: string | null = null;
+      let postersZipped = 0;
 
       const processingSummary = await processAllCombinations(
         psdFiles,
         posterFiles,
         setProgress,
+        async (posterName) => {
+          zip = new JSZip();
+          currentPosterZipName = `${sanitizeZipName(posterName)}.zip`;
+        },
+        async () => {
+          if (!zip || !currentPosterZipName) return;
+          const zipBlob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'STORE',
+            streamFiles: true,
+          });
+          saveAs(zipBlob, currentPosterZipName);
+          postersZipped++;
+          setZipParts(postersZipped);
+          zip = null;
+          currentPosterZipName = null;
+          await new Promise<void>((r) => setTimeout(r, 0));
+        },
         async (outputName, blob) => {
+          if (!zip) return;
           zip.file(outputName, blob, { binary: true });
-          inPart++;
-          if (inPart >= ZIP_PART_SIZE) {
-            await flushPart();
-          }
         }
       );
-
-      await flushPart();
 
       if (processingSummary.succeeded === 0) {
         setErrorMsg('Keine Bilder konnten generiert werden. Prüfe ob deine PSD-Dateien eine Ebene namens "DESIGN_HERE" enthalten.');

@@ -344,6 +344,8 @@ export async function processAllCombinations(
   psdFiles: File[],
   posterFiles: File[],
   onProgress: (progress: ProcessingProgress) => void,
+  onPosterStart: (posterName: string, posterFile: File) => Promise<void> | void,
+  onPosterDone: (posterName: string, posterFile: File) => Promise<void> | void,
   onResult: (outputName: string, blob: Blob) => Promise<void> | void,
   quality: number = 0.92
 ): Promise<ProcessingSummary> {
@@ -355,6 +357,7 @@ export async function processAllCombinations(
   // Group by poster: each poster gets a folder, mockups are numbered
   for (const posterFile of posterFiles) {
     const posterName = posterFile.name.replace(/\.(jpe?g|png|webp)$/i, '');
+    await onPosterStart(posterName, posterFile);
     let mockupIndex = 1;
     for (const psdFile of psdFiles) {
       const outputName = psdFiles.length === 1
@@ -386,6 +389,7 @@ export async function processAllCombinations(
         currentPoster: posterFile.name,
       });
     }
+    await onPosterDone(posterName, posterFile);
   }
 
   return { processed: total, succeeded, failed };
