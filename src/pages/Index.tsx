@@ -37,10 +37,13 @@ const Index = () => {
 
       const sanitizeZipName = (name: string) =>
         name
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
           .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 120) || 'poster';
+          .replace(/[^a-zA-Z0-9_-]/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '')
+          .slice(0, 50) || 'poster';
 
       let zip: JSZip | null = null;
       let currentPosterZipName: string | null = null;

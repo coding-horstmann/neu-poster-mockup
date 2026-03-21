@@ -225,6 +225,22 @@ export async function readPsdFile(file: File): Promise<Psd> {
   return readPsd(new Uint8Array(buffer), { skipCompositeImageData: false, skipLayerImageData: false });
 }
 
+/**
+ * Erzeugt kurze, sichere Dateinamen ohne Sonderzeichen (für ZIP-Entpackung).
+ */
+function sanitizeFileName(name: string, maxLength: number = 40): string {
+  const normalized = name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Diakritika entfernen (é→e, ü→u)
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, maxLength) || 'img';
+  return normalized || 'img';
+}
+
 export function getPsdHasDesignLayer(psd: Psd): boolean {
   if (!psd.children) return false;
   for (const child of psd.children) {
@@ -358,12 +374,13 @@ export async function processAllCombinations(
   // Group by poster: each poster gets a folder, mockups are numbered
   for (const posterFile of posterFiles) {
     const posterName = posterFile.name.replace(/\.(jpe?g|png|webp)$/i, '');
+    const safeName = sanitizeFileName(posterName);
     await onPosterStart(posterName, posterFile);
     let mockupIndex = 1;
     for (const psdFile of psdFiles) {
       const outputName = psdFiles.length === 1
-        ? `${posterName}/${posterName}.jpg`
-        : `${posterName}/${posterName} (${mockupIndex}).jpg`;
+        ? `${safeName}/${safeName}.jpg`
+        : `${safeName}/${safeName}_${mockupIndex}.jpg`;
 
       onProgress({
         current,
