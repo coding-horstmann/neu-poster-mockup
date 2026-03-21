@@ -236,7 +236,8 @@ export function getPsdHasDesignLayer(psd: Psd): boolean {
 export async function compositeImage(
   psdFile: File,
   posterFile: File,
-  quality: number = 0.92
+  quality: number = 0.92,
+  shrinkPx: number = 2
 ): Promise<Blob> {
   const buffer = await psdFile.arrayBuffer();
   const psd = readPsd(new Uint8Array(buffer), { skipCompositeImageData: false, skipLayerImageData: false });
@@ -262,8 +263,7 @@ export async function compositeImage(
   // Extract corner points (supports perspective via placedLayer)
   const corners = extractCornerPoints(designLayer);
   // Shrink corners inward so the poster sits behind the frame, not on top
-  const SHRINK_PX = 2;
-  const shrunk = expandCorners(corners, -SHRINK_PX);
+  const shrunk = expandCorners(corners, -shrinkPx);
   const [etl, etr, ebr, ebl] = shrunk;
 
   console.log('Design corners:', corners.map(c => `(${Math.round(c[0])},${Math.round(c[1])})`).join(' '));
@@ -347,7 +347,8 @@ export async function processAllCombinations(
   onPosterStart: (posterName: string, posterFile: File) => Promise<void> | void,
   onPosterDone: (posterName: string, posterFile: File) => Promise<void> | void,
   onResult: (outputName: string, blob: Blob) => Promise<void> | void,
-  quality: number = 0.92
+  quality: number = 0.92,
+  shrinkPx: number = 2
 ): Promise<ProcessingSummary> {
   const total = psdFiles.length * posterFiles.length;
   let current = 0;
@@ -372,7 +373,7 @@ export async function processAllCombinations(
       });
 
       try {
-        const blob = await compositeImage(psdFile, posterFile, quality);
+        const blob = await compositeImage(psdFile, posterFile, quality, shrinkPx);
         await onResult(outputName, blob);
         succeeded++;
       } catch (err) {

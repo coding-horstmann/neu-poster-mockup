@@ -7,12 +7,15 @@ import DropZone from '@/components/DropZone';
 import ProcessingStatus from '@/components/ProcessingStatus';
 import { processAllCombinations, type ProcessingProgress, type ProcessingSummary } from '@/lib/psd-processor';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
 
 type AppState = 'idle' | 'processing' | 'done' | 'error';
 
 const Index = () => {
   const [psdFiles, setPsdFiles] = useState<File[]>([]);
   const [posterFiles, setPosterFiles] = useState<File[]>([]);
+  const [shrinkPx, setShrinkPx] = useState(0);
   const [state, setState] = useState<AppState>('idle');
   const [progress, setProgress] = useState<ProcessingProgress | null>(null);
   const [summary, setSummary] = useState<ProcessingSummary | null>(null);
@@ -68,7 +71,9 @@ const Index = () => {
         async (outputName, blob) => {
           if (!zip) return;
           zip.file(outputName, blob, { binary: true });
-        }
+        },
+        0.92,
+        shrinkPx
       );
 
       if (processingSummary.succeeded === 0) {
@@ -82,7 +87,7 @@ const Index = () => {
       setErrorMsg(err.message || 'Unbekannter Fehler');
       setState('error');
     }
-  }, [psdFiles, posterFiles]);
+  }, [psdFiles, posterFiles, shrinkPx]);
 
   const handleReset = () => {
     setState('idle');
@@ -131,6 +136,27 @@ const Index = () => {
               icon="image"
             />
           </div>
+
+          {/* Shrink-Einstellung */}
+          {canStart && (
+            <div className="space-y-2 rounded-lg border border-border bg-card px-5 py-4">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="shrink-slider" className="font-mono text-sm">
+                  Rahmen-Einrückung: <span className="font-semibold text-foreground">{shrinkPx} px</span>
+                </Label>
+                <span className="text-xs text-muted-foreground">0 = kein Rand</span>
+              </div>
+              <Slider
+                id="shrink-slider"
+                min={0}
+                max={5}
+                step={1}
+                value={[shrinkPx]}
+                onValueChange={([v]) => setShrinkPx(v)}
+                className="w-full"
+              />
+            </div>
+          )}
 
           {/* Info bar */}
           {canStart && (
