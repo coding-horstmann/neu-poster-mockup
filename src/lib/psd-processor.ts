@@ -249,6 +249,114 @@ export function getPsdHasDesignLayer(psd: Psd): boolean {
   return false;
 }
 
+function mapBlendMode(psBlendMode: string | undefined): GlobalCompositeOperation {
+  if (!psBlendMode) return 'source-over';
+  const map: Record<string, GlobalCompositeOperation> = {
+    'normal': 'source-over',
+    'multiply': 'multiply',
+    'screen': 'screen',
+    'overlay': 'overlay',
+    'darken': 'darken',
+    'lighten': 'lighten',
+    'color dodge': 'color-dodge',
+    'color burn': 'color-burn',
+    'hard light': 'hard-light',
+    'soft light': 'soft-light',
+    'difference': 'difference',
+    'exclusion': 'exclusion',
+    'hue': 'hue',
+    'saturation': 'saturation',
+    'color': 'color',
+    'luminosity': 'luminosity',
+    'linear dodge': 'lighter',
+    'pass through': 'source-over',
+  };
+  return map[psBlendMode] || 'source-over';
+}
+
+function detectLayerOrder(layers: Layer[]): 'bottom-to-top' | 'top-to-bottom' {
+  if (layers.length === 0) return 'bottom-to-top';
+  const firstName = (layers[0]?.name || '').toLowerCase();
+  const lastName = (layers[layers.length - 1]?.name || '').toLowerCase();
+  const bgNames = ['background', 'hintergrund', 'bg', 'arrière-plan', 'fondo', 'fond'];
+  if (bgNames.some(bg => firstName === bg)) return 'bottom-to-top';
+  if (bgNames.some(bg => lastName === bg)) return 'top-to-bottom';
+  return 'bottom-to-top';
+}
+
+/**
+ * Collect all layers that render ABOVE DESIGN_HERE in the PSD layer stack.
+ * These are the overlay layers (shadows, reflections, frame parts, etc.)
+ * that should be re-applied on top of the replaced poster.
+ */
+function collectOverlayLayers(layers: Layer[], order: 'bottom-to-top' | 'top-to-bottom'): Layer[] {
+  const overlays: Layer[] = [];
+  let foundDesign = false;
+
+  const renderOrder = order === 'bottom-to-top' ? layers : [...layers].reverse();
+
+  for (const layer of renderOrder) {
+    if (foundDesign) {
+      overlays.push(layer);
+    } else if (layer.name?.toUpperCase() === 'DESIGN_HERE') {
+      foundDesign = true;
+    } else if (layer.children) {
+      if (findDesignLayer(layer)) {
+        foundDesign = true;
+        const innerOverlays = collectOverlayLayers(layer.children, order);
+        overlays.push(...innerOverlays);
+      }
+    }
+  }
+
+  return overlays;
+}
+
+function hasCanvasData(layer: Layer): boolean {
+  if ((layer as any).canvas) return true;
+  if (layer.children) return layer.children.some(child => hasCanvasData(child));
+  return false;
+}
+
+function renderOverlayLayer(
+  ctx: CanvasRenderingContext2D,
+  layer: Layer,
+  canvasWidth: number,
+  canvasHeight: number
+) {
+  if (layer.hidden) return;
+  const opacity = layer.opacity ?? 1;
+  if (opacity <= 0) return;
+
+  if (layer.children) {
+    const groupBlendMode = layer.blendMode || 'pass through';
+    if (groupBlendMode === 'pass through') {
+      for (const child of layer.children) {
+        renderOverlayLayer(ctx, child, canvasWidth, canvasHeight);
+      }
+    } else {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvasWidth;
+      tempCanvas.height = canvasHeight;
+      const tempCtx = tempCanvas.getContext('2d')!;
+      for (const child of layer.children) {
+        renderOverlayLayer(tempCtx, child, canvasWidth, canvasHeight);
+      }
+      ctx.save();
+      ctx.globalCompositeOperation = mapBlendMode(groupBlendMode);
+      ctx.globalAlpha = opacity;
+      ctx.drawImage(tempCanvas, 0, 0);
+      ctx.restore();
+    }
+  } else if ((layer as any).canvas) {
+    ctx.save();
+    ctx.globalCompositeOperation = mapBlendMode(layer.blendMode);
+    ctx.globalAlpha = opacity;
+    ctx.drawImage((layer as any).canvas, layer.left ?? 0, layer.top ?? 0);
+    ctx.restore();
+  }
+}
+
 export async function compositeImage(
   psdFile: File,
   posterFile: File,
@@ -326,22 +434,54 @@ export async function compositeImage(
     etl, etr, ebr, ebl
   );
 
-  // === Step 3: Composite: base + poster + full composite (Multiply for shadows) ===
+  // === Step 3: Composite with layer-aware overlay rendering ===
   const outputCanvas = document.createElement('canvas');
   outputCanvas.width = psdW;
   outputCanvas.height = psdH;
   const ctx = outputCanvas.getContext('2d')!;
 
-  // Draw base (composite with white design area)
   ctx.drawImage(baseCanvas, 0, 0);
-
-  // Draw distorted poster on top
   ctx.drawImage(posterCanvas, 0, 0);
 
-  // Draw original full composite with Multiply blend mode (for shadows, frames, etc.)
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.drawImage(psd.canvas, 0, 0);
-  ctx.globalCompositeOperation = 'source-over';
+  const layerOrder = detectLayerOrder(psd.children || []);
+  const overlayLayers = collectOverlayLayers(psd.children || [], layerOrder);
+  const usableOverlays = overlayLayers.filter(l => !l.hidden && hasCanvasData(l));
+
+  console.log(`Layer order: ${layerOrder}, overlay layers: ${usableOverlays.length}`);
+  for (const ol of usableOverlays) {
+    console.log(`  Overlay: "${ol.name}" blend=${ol.blendMode} opacity=${ol.opacity} hasCanvas=${!!(ol as any).canvas} children=${ol.children?.length ?? 0}`);
+  }
+
+  if (usableOverlays.length > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(etl[0], etl[1]);
+    ctx.lineTo(etr[0], etr[1]);
+    ctx.lineTo(ebr[0], ebr[1]);
+    ctx.lineTo(ebl[0], ebl[1]);
+    ctx.closePath();
+    ctx.clip();
+
+    for (const overlay of usableOverlays) {
+      renderOverlayLayer(ctx, overlay, psdW, psdH);
+    }
+
+    ctx.restore();
+  } else {
+    // Fallback: multiply with full composite (original behavior for PSDs without readable overlay layers)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(etl[0], etl[1]);
+    ctx.lineTo(etr[0], etr[1]);
+    ctx.lineTo(ebr[0], ebr[1]);
+    ctx.lineTo(ebl[0], ebl[1]);
+    ctx.closePath();
+    ctx.clip();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.drawImage(psd.canvas, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
+  }
 
   // Export as JPEG
   return new Promise<Blob>((resolve, reject) => {
